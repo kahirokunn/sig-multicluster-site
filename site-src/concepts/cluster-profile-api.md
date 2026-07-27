@@ -2,33 +2,56 @@
 
 This document provides an overview of the [ClusterProfile API](https://github.com/kubernetes-sigs/cluster-inventory-api?tab=readme-ov-file#cluster-profile-api).
 
-![Alt](../images/cluster-profile-api.png "ClusterProfile API")
-
-A Cluster Profile is a namespace-level resource and essentially represents an individual member of the Cluster Inventory
-that details properties and status of a cluster. This API proposes a standardized interface that defines how cluster information should be presented
-and interacted with across different platforms and [implementations](../implementations/cluster-inventory-api-implementations.md).
+ClusterProfile is a namespace-scoped resource that describes one member cluster.
+It gives cluster managers and consumers a common way to publish and read cluster
+properties, status, and access information across
+[implementations](../implementations/cluster-inventory-api-implementations.md).
 
 You can read more details about the API in the [KEP-4322](https://github.com/kubernetes/enhancements/blob/master/keps/sig-multicluster/4322-cluster-inventory/README.md).
 
 ## Terminology
 
-- **Cluster Inventory**: A conceptual term referring to a collection of clusters. A cluster inventory may or may not represent
-a [ClusterSet](../api-types/cluster-set.md). A cluster inventory is considered a clusterSet if all its member clusters adhere to the 
-[namespace sameness](https://github.com/kubernetes/community/blob/master/sig-multicluster/namespace-sameness-position-statement.md) principle.
+- **Cluster Inventory**: The ClusterProfile objects in one namespace. See
+  [Cluster inventories](#cluster-inventories).
 
-- **Cluster Manager**: An entity that creates the ClusterProfile API object per member cluster
-  and keeps their status up-to-date. Each cluster manager MUST be identified with a unique name;
-  each ClusterProfile SHOULD be owned by exactly one cluster manager (via `spec.clusterManager.name`
-  and the label `x-k8s.io/cluster-manager`). A cluster manager may use multiple internal controllers
-  or plugins to update different parts of `.status` (e.g. version, properties, conditions,
-  [accessProviders](https://github.com/kubernetes/enhancements/blob/master/keps/sig-multicluster/5339-clusterprofile-plugin-credentials/README.md));
-  when multiple actors write status, use [Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)
-  with distinct field managers. Controllers select ClusterProfiles by the owning cluster manager
-  name (label or spec).
+- **Member Cluster**: A Kubernetes cluster represented by a ClusterProfile in a cluster inventory.
 
-- **ClusterProfile API Consumer**: the person running the cluster managers
-  or the person developing extensions for cluster managers for the purpose of
-  workload distribution, operation management etc.
+- **Cluster Manager**: A controller that creates a ClusterProfile for each
+  member cluster and keeps its status up to date. Each cluster manager MUST
+  have a unique name, recorded in `spec.clusterManager.name`. Each
+  ClusterProfile MUST include the `x-k8s.io/cluster-manager` label with the same
+  value. If multiple controllers update status, they use [Server-Side
+  Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)
+  with distinct field managers.
+
+- **ClusterProfile API Consumer**: A controller or tool that reads
+  ClusterProfile objects to discover, connect to, or operate on member
+  clusters.
+
+## Cluster inventories
+
+A hub cluster can host multiple inventories in separate namespaces. This gives
+consumers a single integration point and lets administrators use
+namespace-based RBAC to grant each consumer access only to the inventory it
+needs.
+
+Inventories can be organized per consumer. In the following example, Argo CD
+reads the `argocd` inventory containing the dev, staging, and prod clusters.
+MultiKueue reads the `kueue` inventory containing the prod and batch clusters.
+The prod cluster appears in both inventories, represented by one ClusterProfile
+in each namespace.
+
+![ClusterProfile inventories for Argo CD and MultiKueue on a hub cluster, with the prod cluster represented in both](../images/cluster-profile-api.svg "Cluster managers, inventories, consumers, and member clusters")
+
+Cluster managers differ in how they choose the namespace where they publish
+ClusterProfiles. See [Cluster Inventory API
+implementations](../implementations/cluster-inventory-api-implementations.md)
+for current behavior.
+
+A cluster inventory is independent of a
+[ClusterSet](../api-types/cluster-set.md). The `clusterset.k8s.io` property
+records ClusterSet membership, not the inventories where a member cluster
+appears.
 
 ## Access to member clusters (`status.accessProviders`)
 
