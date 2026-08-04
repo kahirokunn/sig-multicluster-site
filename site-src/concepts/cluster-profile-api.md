@@ -53,6 +53,51 @@ A cluster inventory is independent of a
 records ClusterSet membership, not the inventories where a member cluster
 appears.
 
+Within an inventory, a member cluster SHOULD be represented by at most one
+ClusterProfile, although the same member cluster can appear in different
+inventories.
+
+### Identifying duplicate ClusterProfiles
+
+Cluster managers SHOULD add the
+`multicluster.x-k8s.io/inventory-member-id` label to each ClusterProfile. The
+label MUST have a non-empty value when set, and cluster managers SHOULD keep the
+value unchanged while the ClusterProfile represents the same member cluster.
+The platform administrator SHOULD coordinate values on the hub so that
+ClusterProfiles for the same member cluster use the same value and those for
+different member clusters use different values.
+
+A consumer SHOULD compare only the ClusterProfiles selected by its configuration,
+such as inventory namespaces, label selectors, or object references. It SHOULD
+deduplicate them only when its actions would conflict. Objects outside the
+selected set do not affect that consumer and need not be listed or watched solely
+for deduplication.
+
+[![A consumer selects one of two ClusterProfiles with the same inventory member ID; the unselected duplicate does not affect the consumer or cause a warning](../images/cluster-profile-deduplication-selection.svg "Duplicates outside a consumer's selected set")](../images/cluster-profile-deduplication-selection.svg)
+
+Selecting multiple ClusterProfiles with the same inventory member ID does not
+by itself require deduplication. If the consumer can act on all selected objects
+without the actions conflicting, it can act on all of them without a warning.
+If the actions would conflict, the consumer SHOULD act only on the oldest
+object. For conflicting objects in the same inventory, it SHOULD warn until the
+platform administrator removes the duplicates.
+
+[![Two selected ClusterProfiles with the same inventory member ID are safe when their actions are disjoint; conflicting actions are deduplicated and produce a warning](../images/cluster-profile-deduplication-conflicts.svg "Conflict-aware handling of selected duplicates")](../images/cluster-profile-deduplication-conflicts.svg)
+
+The following cases need additional handling:
+
+| Situation | Behavior |
+| --- | --- |
+| Two or more conflicting objects share the oldest `creationTimestamp` | The consumer SHOULD NOT act on any of the tied objects. |
+| The label is missing or empty | Treat it as absent; do not correlate or deduplicate the object using this mechanism. |
+| The same ID appears in different inventories | The objects do not require deletion or a warning solely because they share the ID. If selected, the consumer still applies the conflict rule above. |
+
+Regardless of consumer selection or conflicts, the platform administrator SHOULD
+delete all but one ClusterProfile for the same member cluster from each inventory.
+See
+[KEP-4322](https://github.com/kubernetes/enhancements/blob/master/keps/sig-multicluster/4322-cluster-inventory/README.md#uniqueness-of-the-clusterprofile-object)
+for the normative requirements.
+
 ## Access to member clusters (`status.accessProviders`)
 
 ClusterProfile describes a cluster, but it does not define a single universal way to authenticate to that cluster.
@@ -87,20 +132,21 @@ See the reference for the exact schema and semantics:
 [CRD definition](https://github.com/kubernetes-sigs/cluster-inventory-api/blob/main/config/crd/bases/multicluster.x-k8s.io_clusterprofiles.yaml)
 
 ```yaml
-apiVersion: multicluster.x-k8s.io/v1alpha1
+apiVersion: multicluster.x-k8s.io/v1alpha2
 kind: ClusterProfile
 metadata:
   name: some-cluster-name
   namespace: fleet-system
   labels:
     x-k8s.io/cluster-manager: some-cluster-manager
+    multicluster.x-k8s.io/inventory-member-id: cluster-us-east
 spec:
   displayName: some-cluster
   clusterManager:
     name: some-cluster-manager
 status:
   version:
-    kubernetes: 1.28.0
+    kubernetes: "1.28.0"
   properties:
     - name: clusterset.k8s.io
       value: some-clusterset
@@ -117,11 +163,13 @@ status:
               clusterName: some-cluster-name
   conditions:
     - type: ControlPlaneHealthy
-      status: True
+      status: "True"
+      reason: AsExpected
       lastTransitionTime: "2023-05-08T07:56:55Z"
       message: ""
     - type: Joined
-      status: True
+      status: "True"
+      reason: ClusterRegistered
       lastTransitionTime: "2023-05-08T07:58:55Z"
       message: ""
 ```
